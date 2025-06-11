@@ -1,0 +1,166 @@
+---
+title: "preprocess"
+author: "Hachem Brahimi"
+date: "2025-04-25"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+```
+
+```{r}
+data <- read_csv("data_final3.csv")
+data %>% glimpse()
+```
+```{r}
+
+#normalize <- function(x) (x - min(x, na.rm = TRUE)) / 
+ #                     (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+
+groups <- data %>%
+  mutate(times= make_datetime(YEAR,MO,DY,HR)) %>%
+  group_by(LON, LAT) %>% 
+  select(LON, LAT, times, RH2M, T2M, PRECTOTCORR,WS2M) %>% 
+  group_split()
+
+
+```
+
+```{r}
+# Parameters
+overlap <- 3  # Number of steps to overlap between windows
+max_length <- 3  # Length of each input window
+target_length <- 1  # Number of steps to predict
+
+# Initialize an empty list to store the results from each group
+all_groups_data <- list()
+
+
+total_iterations <- 0  
+
+# First pass to calculate total iterations
+for (g in groups) {
+  valid_rows <- nrow(g) - max_length - target_length + 1
+  if (valid_rows > 0) {
+    start_index <- seq(1, valid_rows, by = max_length - overlap + 1)
+    total_iterations <- total_iterations + length(start_index)
+  }
+}
+
+
+counter <- 0
+
+
+for (g_idx in seq_along(groups)) {
+  g <- groups[[g_idx]]
+  
+  # Calculate valid start indices FOR THIS GROUP
+  valid_rows <- nrow(g) - max_length - target_length + 1
+  if (valid_rows < 1) next  # Skip groups with insufficient data
+  
+  start_index <- seq(1, valid_rows, by = max_length - overlap + 1)
+  
+  
+  n_windows <- length(start_index)
+  data_matrix <- matrix(
+    nrow = n_windows,
+    ncol = (max_length * 4) + (target_length * 2) + 2 + 1  # 3 vars * time steps + targets + coords
+  )
+  
+  
+  for (i in seq_along(start_index)) {
+    start <- start_index[i]
+    end_input <- start + max_length - 1
+    end_target <- end_input + target_length
+    
+    
+    temporal_part <- g[start:end_input, c("RH2M", "T2M", "PRECTOTCORR", "WS2M")]
+    flattened_part <- as.vector(t(temporal_part))  
+    
+    
+    target_part <- g[(end_input + 1):end_target, c( "T2M", "PRECTOTCORR")]
+    flattened_target <- as.vector(t(target_part))
+    
+    
+    spatial_info <- as.numeric(g[start, c("LON", "LAT")])
+    
+    timestamp <- as.numeric(g[end_input + 1, "times"])  
+    
+    data_matrix[i, ] <- c(
+      flattened_part,
+      flattened_target,
+      spatial_info,
+      timestamp
+    )
+    
+    # Update progress
+    counter <- counter + 1
+    cat(sprintf("Processing group %d/%d: %.2f%%\r",
+                g_idx, length(groups),
+        counter/total_iterations*100)
+    )
+  }
+  
+  # Store group results
+  all_groups_data[[g_idx]] <- data_matrix
+}
+
+# Combine all groups 
+final_data_matrix <- do.call(rbind, all_groups_data)
+#final_data_matrix <- as_tibble(final_data_matrix)
+
+# Set column names
+
+
+```
+```{r}
+final_data_matrix <- as_tibble(final_data_matrix)
+final_data_matrix
+```
+
+```{r}
+data %>% head()
+```
+
+```{r}
+final_data_matrix <- final_data_matrix %>%
+  rename_with(~ paste0("V", seq_along(.)), everything()) %>%
+  rename(
+    RH2M_1 = V1,
+    T2M_1 = V2,
+    PRECTOTCORR_1 = V3,
+    WS2M_1 = V4,
+    RH2M_2 = V5,
+    T2M_2 = V6,
+    PRECTOTCORR_2 = V7,
+    WS2M_2 = V8,
+    RH2M_3 = V9,
+    T2M_3 = V10,
+    PRECTOTCORR_3 = V11,
+    WS2M_3 = V12,
+    T2M_target_1 = V13,
+    PRECTOTCORR_target_1 = V14,
+    LON = V15,
+    LAT = V16,
+    timestamp = V17
+  )
+```
+```{r}
+```
+
+
+```{r}
+```
+
+
+```{r}
+# Save the final data matrix to a CSV file
+write_csv(final_data_matrix, "prepared_data_vf3.csv")
+```
+

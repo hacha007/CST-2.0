@@ -1,0 +1,114 @@
+---
+title: "Untitled"
+author: "Hachem Brahimi"
+date: "2025-05-14"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(nasapower)
+library(rnaturalearth)
+```
+```{r}
+dz <- read_csv("dz.csv")
+```
+```{r}
+dz %>% count(city)
+```
+
+```{r}
+dz %>% filter(city==c('Barika','Béchar','Illizi'))
+```
+```{r}
+
+mapp <- dz %>%
+  sample_n(10) %>%          # randomly sample 10 rows
+  select(lat, lng) %>%      # keep only lat and lng columns
+  mutate(row_id = row_number())  # add a row id
+
+```
+
+
+```{r}
+mapp
+```
+
+```{r}
+ne_states(country = "Algeria", returnclass = "sf") %>% as_tibble() %>% 
+  select(name, latitude, longitude) %>% 
+  filter(name %in% c("Alger",'Biskra','Guelma','Oran'))
+```
+
+```{r}
+mapp2 <-  ne_states(country = "Algeria", returnclass = "sf") %>% as_tibble() %>% 
+  select(name, latitude, longitude) %>% 
+  filter(name %in% c("Alger",'Biskra','Guelma','Oran')) %>% 
+  select(latitude, longitude) %>%
+  mutate(lng = longitude ) %>% 
+  mutate(lat = latitude) %>% 
+  select(lat, lng) %>% 
+  mutate(row_id = row_number()) 
+```
+```{r}
+mapp2
+```
+
+```{r}
+fetch_hourly_point <- function(lng, lat, pars, start_date, end_date, community = "ag", counter = NULL, total = NULL) {
+  if (!is.null(counter) && !is.null(total)) {
+    message(sprintf("[%d/%d] Fetching [%s, %s]...", counter, total, lng, lat))
+  } else {
+    message(sprintf("Fetching [%s, %s]...", lng, lat))
+  }
+
+  tryCatch({
+    df <- get_power(
+      community = community,
+      lonlat = c(lng, lat),
+      pars = pars,
+      dates = c(start_date, end_date),
+      temporal_api = "hourly"
+    )
+    df$LNG <- lng
+    df$LAT <- lat
+    return(df)
+  }, error = function(e) {
+    warning(sprintf("Failed at [%s, %s]: %s", lng, lat, e$message))
+    return(NULL)
+  })
+}
+
+start_date <- "2024-01-01"
+end_date <- "2024-12-31"
+params <- c("RH2M", "T2M", "PRECTOTCORR",'WS2M')
+total_points <- nrow(mapp)
+
+# Fetch and bind rows directly into a single dataframe
+hourly_data_df <- pmap_dfr(mapp2, function(lng, lat, row_id) {
+  
+  fetch_hourly_point(
+    lng, lat,
+    pars = params,
+    start_date = start_date,
+    end_date = end_date,
+    counter = row_id,
+    total = total_points
+  )
+})
+
+```
+
+```{r}
+hourly_data_df %>% 
+  summary()
+```
+
+```{r}
+write_csv(hourly_data_df, "data_final3.csv")
+```
+
